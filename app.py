@@ -9,18 +9,15 @@ nltk.download('omw-1.4', quiet=True)
 
 import io
 import requests
-from flask import Flask, render_template_string, request, redirect, session
+from flask import Flask, request, redirect, session
 from pyresparser import ResumeParser
 from docx import Document
 from PyPDF2 import PdfReader
 from openpyxl import load_workbook
 
-# Resto do código permanece igual...
-
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 
-# Configuração inicial
 AI_SERVICES = {
     'OpenAI': {
         'guide': [
@@ -64,9 +61,10 @@ HTML_BASE = '''
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        .container { max-width: 800px; margin: 50px auto; }
-        .card { margin-top: 20px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
-        .guide-step { margin: 15px 0; padding: 10px; background: #f8f9fa; border-radius: 5px; }
+        .container {{ max-width: 800px; margin: 50px auto; }}
+        .card {{ margin-top: 20px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }}
+        .guide-step {{ margin: 15px 0; padding: 10px; background: #f8f9fa; border-radius: 5px; }}
+        .btn-custom {{ margin: 5px; padding: 15px 30px; font-size: 1.1em; }}
     </style>
 </head>
 <body>
@@ -74,7 +72,7 @@ HTML_BASE = '''
         <h2 class="text-center mb-4">📄 Sistema de Resumo de Documentos</h2>
         <div class="card p-4">
             <a href="/" class="btn btn-secondary mb-3">🏠 Voltar</a>
-            {% block content %}{% endblock %}
+            {}
         </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -142,13 +140,14 @@ def generate_summary(text, filename):
 
 @app.route('/')
 def home():
-    return render_template_string(HTML_BASE, content='''
-        <div class="text-center">
-            <h4 class="mb-4">Selecione uma opção:</h4>
-            <a href="/settings" class="btn btn-primary btn-lg mb-2">⚙️ Configurações do Sistema</a><br>
-            <a href="/process" class="btn btn-success btn-lg">📄 Usar o Sistema</a>
-        </div>
-    ''')
+    content = '''
+    <div class="text-center">
+        <h4 class="mb-4">Selecione uma opção:</h4>
+        <a href="/settings" class="btn btn-primary btn-custom">⚙️ Configurações</a>
+        <a href="/process" class="btn btn-success btn-custom">📄 Processar Documento</a>
+    </div>
+    '''
+    return HTML_BASE.format(content)
 
 @app.route('/settings', methods=['GET', 'POST'])
 def settings():
@@ -156,21 +155,22 @@ def settings():
         session['ai_service'] = request.form.get('ai_service')
         return redirect(f'/configure/{request.form.get("ai_service")}')
     
-    return render_template_string(HTML_BASE, content='''
-        <h4 class="mb-4">🔧 Configurações do Sistema</h4>
-        <form method="POST">
-            <div class="mb-3">
-                <label class="form-label">Selecione o serviço de IA:</label>
-                <select name="ai_service" class="form-select" required>
-                    <option value="">-- Selecione --</option>
-                    <option value="OpenAI">OpenAI (GPT-3.5)</option>
-                    <option value="HuggingFace">HuggingFace</option>
-                    <option value="Cohere">Cohere</option>
-                </select>
-            </div>
-            <button type="submit" class="btn btn-primary">Avançar</button>
-        </form>
-    ''')
+    content = '''
+    <h4 class="mb-4">🔧 Configurações do Sistema</h4>
+    <form method="POST">
+        <div class="mb-3">
+            <label class="form-label">Selecione o serviço de IA:</label>
+            <select name="ai_service" class="form-select" required>
+                <option value="">-- Selecione --</option>
+                <option value="OpenAI">OpenAI (GPT-3.5)</option>
+                <option value="HuggingFace">HuggingFace</option>
+                <option value="Cohere">Cohere</option>
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary">Avançar</button>
+    </form>
+    '''
+    return HTML_BASE.format(content)
 
 @app.route('/configure/<service>', methods=['GET', 'POST'])
 def configure(service):
@@ -179,20 +179,21 @@ def configure(service):
         return redirect('/')
     
     guide = AI_SERVICES.get(service, {}).get('guide', [])
-    return render_template_string(HTML_BASE, content=f'''
-        <h4 class="mb-4">🔑 Configurar {service}</h4>
-        <div class="mb-4">
-            <h5>Siga estas instruções:</h5>
-            {'<hr>'.join(f'<div class="guide-step">{step}</div>' for step in guide)}
+    content = f'''
+    <h4 class="mb-4">🔑 Configurar {service}</h4>
+    <div class="mb-4">
+        <h5>Siga estas instruções:</h5>
+        {'<hr>'.join(f'<div class="guide-step">{step}</div>' for step in guide)}
+    </div>
+    <form method="POST">
+        <div class="mb-3">
+            <label class="form-label">Cole sua chave API aqui:</label>
+            <input type="text" name="api_key" class="form-control" required>
         </div>
-        <form method="POST">
-            <div class="mb-3">
-                <label class="form-label">Cole sua chave API aqui:</label>
-                <input type="text" name="api_key" class="form-control" required>
-            </div>
-            <button type="submit" class="btn btn-primary">Salvar</button>
-        </form>
-    ''')
+        <button type="submit" class="btn btn-primary">Salvar</button>
+    </form>
+    '''
+    return HTML_BASE.format(content)
 
 @app.route('/process', methods=['GET', 'POST'])
 def process():
@@ -210,25 +211,27 @@ def process():
         text = extract_text(file)
         summary = generate_summary(text, file.filename)
         
-        return render_template_string(HTML_BASE, content=f'''
-            <h4 class="mb-4">📝 Resumo Gerado</h4>
-            <div class="alert alert-success">
-                <h5>{file.filename}</h5>
-                <pre style="white-space: pre-wrap;">{summary}</pre>
-            </div>
-            <a href="/process" class="btn btn-primary">Nova Análise</a>
-        ''')
+        content = f'''
+        <h4 class="mb-4">📝 Resumo Gerado</h4>
+        <div class="alert alert-success">
+            <h5>{file.filename}</h5>
+            <pre style="white-space: pre-wrap;">{summary}</pre>
+        </div>
+        <a href="/process" class="btn btn-primary">Nova Análise</a>
+        '''
+        return HTML_BASE.format(content)
     
-    return render_template_string(HTML_BASE, content='''
-        <h4 class="mb-4">📤 Processar Documento</h4>
-        <form method="POST" enctype="multipart/form-data">
-            <div class="mb-3">
-                <label class="form-label">Selecione o arquivo (PDF, DOCX, XLSX):</label>
-                <input type="file" name="file" class="form-control" accept=".pdf,.docx,.xlsx" required>
-            </div>
-            <button type="submit" class="btn btn-primary">Enviar e Processar</button>
-        </form>
-    ''')
+    content = '''
+    <h4 class="mb-4">📤 Processar Documento</h4>
+    <form method="POST" enctype="multipart/form-data">
+        <div class="mb-3">
+            <label class="form-label">Selecione o arquivo (PDF, DOCX, XLSX):</label>
+            <input type="file" name="file" class="form-control" accept=".pdf,.docx,.xlsx" required>
+        </div>
+        <button type="submit" class="btn btn-primary">Enviar e Processar</button>
+    </form>
+    '''
+    return HTML_BASE.format(content)
 
 if __name__ == '__main__':
     app.run(debug=True)
