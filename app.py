@@ -1,4 +1,12 @@
 import os
+os.environ['NLTK_DATA'] = '/opt/render/nltk_data'
+
+import nltk
+nltk.download('stopwords', quiet=True)
+nltk.download('punkt', quiet=True)
+nltk.download('wordnet', quiet=True)
+nltk.download('omw-1.4', quiet=True)
+
 import io
 import requests
 from flask import Flask, render_template_string, request, redirect, session
@@ -6,6 +14,8 @@ from pyresparser import ResumeParser
 from docx import Document
 from PyPDF2 import PdfReader
 from openpyxl import load_workbook
+
+# Resto do código permanece igual...
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
