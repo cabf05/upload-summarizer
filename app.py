@@ -10,7 +10,6 @@ nltk.download('omw-1.4', quiet=True)
 import io
 import requests
 from flask import Flask, request, redirect, session
-from pyresparser import ResumeParser
 from docx import Document
 from PyPDF2 import PdfReader
 from openpyxl import load_workbook
@@ -32,13 +31,12 @@ AI_SERVICES = {
     'HuggingFace': {
         'guide': [
             '1. Acesse https://huggingface.co/ e faça login',
-            '2. Clique em seu ícone de perfil no canto superior direito',
-            '3. Selecione "Settings"',
-            '4. Navegue até "Access Tokens" no menu lateral',
-            '5. Gere um novo token ou copie um existente',
-            '6. Cole o token abaixo'
+            '2. Clique em seu ícone de perfil > Settings > Access Tokens',
+            '3. Gere um token com permissão "Read"',
+            '4. Escolha um modelo na lista abaixo',
+            '5. Cole o token e selecione o modelo desejado'
         ],
-        'api_url': 'https://api-inference.huggingface.co/models/google/flan-t5-large'
+        'api_url': 'https://api-inference.huggingface.co/models/'
     },
     'Cohere': {
         'guide': [
@@ -50,6 +48,19 @@ AI_SERVICES = {
         ],
         'api_url': 'https://api.cohere.ai/v1/generate'
     }
+}
+
+MODELOS_HF = {
+    'português': [
+        ('unicamp-dl/ptt5-base-portuguese-vocab', 'PTT5 (Sumarização em Português)'),
+        ('pierreguillou/bert-base-cased-squad-v1.1-portuguese', 'BERT PT (Q&A)'),
+        ('neuralmind/bert-base-portuguese-cased', 'BERT PT (Geral)')
+    ],
+    'multilíngue': [
+        ('google/mt5-base', 'mT5 (Multilíngue)'),
+        ('facebook/bart-large-cnn', 'BART (Inglês)'),
+        ('google/flan-t5-large', 'FLAN-T5 (Inglês)')
+    ]
 }
 
 HTML_BASE = '''
@@ -65,7 +76,9 @@ HTML_BASE = '''
         .card {{ margin-top: 20px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }}
         .guide-step {{ margin: 15px 0; padding: 10px; background: #f8f9fa; border-radius: 5px; }}
         .btn-custom {{ margin: 5px; padding: 15px 30px; font-size: 1.1em; }}
-        pre {{ white-space: pre-wrap; word-wrap: break-word; }}
+        pre {{ white-space: pre-wrap; word-wrap: break-word; background: #f8f9fa; padding: 15px; border-radius: 5px; }}
+        .model-group {{ margin-bottom: 20px; }}
+        .model-option {{ padding: 10px; border: 1px solid #dee2e6; border-radius: 5px; margin-bottom: 10px; }}
     </style>
 </head>
 <body>
@@ -107,7 +120,15 @@ def generate_summary(text, filename):
     service = session.get('ai_service')
     api_key = session.get('api_key')
     
-    prompt = f"Faça um resumo detalhado e profissional em português brasileiro destas informações extraídas do documento '{filename}':\n\n{text}"
+    prompt = (
+        f"Resuma este documento de forma clara e detalhada em português brasileiro.\n"
+        f"Documento: {filename}\n"
+        f"Conteúdo:\n{text}\n\n"
+        "Instruções:\n"
+        "- Mantenha termos técnicos importantes\n"
+        "- Use estrutura com tópicos\n"
+        "- Limite de 300 palavras\n"
+    )
     
     try:
         if service == 'OpenAI':
@@ -127,28 +148,32 @@ def generate_summary(text, filename):
         
         elif service == 'HuggingFace':
             headers = {'Authorization': f'Bearer {api_key}'}
+            modelo = session.get('hf_model', 'unicamp-dl/ptt5-base-portuguese-vocab')
+            
             data = {
                 "inputs": prompt,
                 "parameters": {
-                    "max_length": 1000,
-                    "temperature": 0.7,
-                    "do_sample": True
+                    "max_length": 512,
+                    "min_length": 150,
+                    "temperature": 0.9,
+                    "repetition_penalty": 2.5,
+                    "num_beams": 4
                 }
             }
             
             response = requests.post(
-                AI_SERVICES[service]['api_url'],
+                f"{AI_SERVICES[service]['api_url']}{modelo}",
                 json=data,
                 headers=headers,
-                timeout=45
+                timeout=60
             )
             
-            # Tratamento específico para Hugging Face
             if response.status_code == 503:
-                return "⚠️ Modelo em carregamento. Por favor, tente novamente em 20 segundos."
+                return "🔃 Modelo está carregando. Recarregue a página em 30 segundos."
                 
-            response.raise_for_status()
-            
+            if response.status_code != 200:
+                return f"Erro {response.status_code}: {response.text[:300]}"
+                
             return response.json()[0]['generated_text']
         
         elif service == 'Cohere':
@@ -171,7 +196,7 @@ def generate_summary(text, filename):
             return response.json()['generations'][0]['text']
     
     except requests.exceptions.RequestException as e:
-        return f"⛔ Erro de conexão com a API: {str(e)}"
+        return f"⛔ Erro de conexão: {str(e)}"
     except KeyError as e:
         return f"⚠️ Erro no formato da resposta: {str(e)}"
     except Exception as e:
@@ -215,23 +240,55 @@ def settings():
 def configure(service):
     if request.method == 'POST':
         session['api_key'] = request.form.get('api_key')
+        if service == 'HuggingFace':
+            session['hf_model'] = request.form.get('hf_model')
         return redirect('/')
     
-    guide = AI_SERVICES.get(service, {}).get('guide', [])
-    content = f'''
-    <h4 class="mb-4">🔑 Configurar {service}</h4>
-    <div class="mb-4">
-        <h5>Siga estas instruções:</h5>
-        {'<hr>'.join(f'<div class="guide-step">{step}</div>' for step in guide)}
-    </div>
-    <form method="POST">
-        <div class="mb-3">
-            <label class="form-label">Cole sua chave API aqui:</label>
-            <input type="text" name="api_key" class="form-control" required>
+    if service == 'HuggingFace':
+        content = f'''
+        <h4 class="mb-4">🔧 Configurar HuggingFace</h4>
+        <div class="mb-4">
+            <h5>Siga estas instruções:</h5>
+            <div class="guide-step">
+                {'</div><div class="guide-step">'.join(AI_SERVICES[service]['guide'])}
+            </div>
         </div>
-        <button type="submit" class="btn btn-primary">Salvar</button>
-    </form>
-    '''
+        <form method="POST">
+            <div class="mb-3">
+                <label class="form-label">Token de Acesso:</label>
+                <input type="text" name="api_key" class="form-control" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Selecione o Modelo:</label>
+                <select name="hf_model" class="form-select" required>
+                    <optgroup label="Modelos em Português">
+                        {"".join(f'<option value="{m[0]}">{m[1]}</option>' for m in MODELOS_HF["português"])}
+                    </optgroup>
+                    <optgroup label="Modelos Multilíngues">
+                        {"".join(f'<option value="{m[0]}">{m[1]}</option>' for m in MODELOS_HF["multilíngue"])}
+                    </optgroup>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary">Salvar</button>
+        </form>
+        '''
+    else:
+        guide = AI_SERVICES.get(service, {}).get('guide', [])
+        content = f'''
+        <h4 class="mb-4">🔑 Configurar {service}</h4>
+        <div class="mb-4">
+            <h5>Siga estas instruções:</h5>
+            {'<hr>'.join(f'<div class="guide-step">{step}</div>' for step in guide)}
+        </div>
+        <form method="POST">
+            <div class="mb-3">
+                <label class="form-label">Cole sua chave API aqui:</label>
+                <input type="text" name="api_key" class="form-control" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Salvar</button>
+        </form>
+        '''
+    
     return HTML_BASE.format(content)
 
 @app.route('/process', methods=['GET', 'POST'])
@@ -274,7 +331,5 @@ def process():
 
 if __name__ == '__main__':
     app.run(debug=True)
-
-if __name__ == '__main__':
     app.run(debug=True)
 
