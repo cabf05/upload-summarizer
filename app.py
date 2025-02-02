@@ -38,7 +38,7 @@ AI_SERVICES = {
             '5. Gere um novo token ou copie um existente',
             '6. Cole o token abaixo'
         ],
-        'api_url': 'https://api-inference.huggingface.co/models/google/flan-t5-xxl'
+        'api_url': 'https://api-inference.huggingface.co/models/google/flan-t5-large'
     },
     'Cohere': {
         'guide': [
@@ -65,6 +65,7 @@ HTML_BASE = '''
         .card {{ margin-top: 20px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }}
         .guide-step {{ margin: 15px 0; padding: 10px; background: #f8f9fa; border-radius: 5px; }}
         .btn-custom {{ margin: 5px; padding: 15px 30px; font-size: 1.1em; }}
+        pre {{ white-space: pre-wrap; word-wrap: break-word; }}
     </style>
 </head>
 <body>
@@ -106,7 +107,7 @@ def generate_summary(text, filename):
     service = session.get('ai_service')
     api_key = session.get('api_key')
     
-    prompt = f"Faça um resumo dessas informações, listadas abaixo, extraídas do documento: {filename}\n\n{text}"
+    prompt = f"Faça um resumo detalhado e profissional em português brasileiro destas informações extraídas do documento '{filename}':\n\n{text}"
     
     try:
         if service == 'OpenAI':
@@ -116,27 +117,65 @@ def generate_summary(text, filename):
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.7
             }
-            response = requests.post(AI_SERVICES[service]['api_url'], json=data, headers=headers)
+            response = requests.post(
+                AI_SERVICES[service]['api_url'],
+                json=data,
+                headers=headers,
+                timeout=30
+            )
             return response.json()['choices'][0]['message']['content']
         
         elif service == 'HuggingFace':
             headers = {'Authorization': f'Bearer {api_key}'}
-            data = {"inputs": prompt}
-            response = requests.post(AI_SERVICES[service]['api_url'], json=data, headers=headers)
+            data = {
+                "inputs": prompt,
+                "parameters": {
+                    "max_length": 1000,
+                    "temperature": 0.7,
+                    "do_sample": True
+                }
+            }
+            
+            response = requests.post(
+                AI_SERVICES[service]['api_url'],
+                json=data,
+                headers=headers,
+                timeout=45
+            )
+            
+            # Tratamento específico para Hugging Face
+            if response.status_code == 503:
+                return "⚠️ Modelo em carregamento. Por favor, tente novamente em 20 segundos."
+                
+            response.raise_for_status()
+            
             return response.json()[0]['generated_text']
         
         elif service == 'Cohere':
-            headers = {'Authorization': f'Bearer {api_key}'}
+            headers = {
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json'
+            }
             data = {
                 "prompt": prompt,
-                "max_tokens": 500,
-                "temperature": 0.7
+                "max_tokens": 1000,
+                "temperature": 0.7,
+                "model": "command-nightly"
             }
-            response = requests.post(AI_SERVICES[service]['api_url'], json=data, headers=headers)
+            response = requests.post(
+                AI_SERVICES[service]['api_url'],
+                json=data,
+                headers=headers,
+                timeout=30
+            )
             return response.json()['generations'][0]['text']
     
+    except requests.exceptions.RequestException as e:
+        return f"⛔ Erro de conexão com a API: {str(e)}"
+    except KeyError as e:
+        return f"⚠️ Erro no formato da resposta: {str(e)}"
     except Exception as e:
-        return f"Erro ao gerar resumo: {str(e)}"
+        return f"⚠️ Erro inesperado: {str(e)}"
 
 @app.route('/')
 def home():
@@ -215,7 +254,7 @@ def process():
         <h4 class="mb-4">📝 Resumo Gerado</h4>
         <div class="alert alert-success">
             <h5>{file.filename}</h5>
-            <pre style="white-space: pre-wrap;">{summary}</pre>
+            <pre>{summary}</pre>
         </div>
         <a href="/process" class="btn btn-primary">Nova Análise</a>
         '''
@@ -232,6 +271,9 @@ def process():
     </form>
     '''
     return HTML_BASE.format(content)
+
+if __name__ == '__main__':
+    app.run(debug=True)
 
 if __name__ == '__main__':
     app.run(debug=True)
